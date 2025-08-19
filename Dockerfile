@@ -1,36 +1,36 @@
-FROM osrf/ros:noetic-desktop-full
+FROM osrf/ros:noetic-desktop-full-focal
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    python3-rosdep \
-    python3-rosinstall \
-    python3-rosinstall-generator \
-    python3-wstool \
-    build-essential
+# Tell the container to use the C.UTF-8 locale for its language settings
+ENV LANG C.UTF-8
 
-# Initialize rosdep
-RUN rosdep init && rosdep update
+RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
-# Create workspace
+# Install required packages
+RUN apt-get update \
+ && apt-get --with-new-pkgs upgrade -y \
+ && apt-get install -y git \
+ && rm -rf /var/lib/apt/lists/*
+
+# Link python3 to python otherwise ROS scripts fail when using the OSRF contianer
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Set up the catkin workspace
 RUN mkdir -p /catkin_ws/src
-WORKDIR /catkin_ws/src
+WORKDIR /tmp
+RUN git clone --depth=1 https://github.com/mathrosas/ros1_testing.git \
+ && mv ros1_testing/tortoisebot /catkin_ws/src/ \
+ && mv ros1_testing/tortoisebot_waypoints /catkin_ws/src/ \
+ && rm -rf ros1_testing
 
-# Clone your repository
-RUN git clone https://github.com/mathrosas/ros1_testing.git
-
-# Install dependencies
-RUN rosdep install --from-paths . --ignore-src -y
-
-# Build the workspace
+# Build
 WORKDIR /catkin_ws
-RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+RUN /bin/bash -lc "source /opt/ros/noetic/setup.bash && catkin_make"
 
-# Add setup to bashrc
-RUN echo "source /catkin_ws/devel/setup.bash" >> ~/.bashrc
+# replace setup.bash in ros_entrypoint.sh
+RUN sed -i 's|source "/opt/ros/\$ROS_DISTRO/setup.bash"|source "/catkin_ws/devel/setup.bash"|g' /ros_entrypoint.sh
 
-# Test entrypoint
-CMD ["/bin/bash", "-c", "source /catkin_ws/devel/setup.bash && \
-     roslaunch tortoisebot_gazebo tortoisebot_playground.launch gui:=false & \
-     sleep 20 && \
-     rostest tortoisebot_waypoints waypoints_test.test"]
+# Cleanup
+RUN rm -rf /root/.cache
+
+# Start a bash shell when the container starts
+CMD ["bash"]
