@@ -6,10 +6,15 @@ ENV LANG C.UTF-8
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
 # Install required packages
-RUN apt-get update \
- && apt-get --with-new-pkgs upgrade -y \
- && apt-get install -y git \
- && rm -rf /var/lib/apt/lists/*
+RUN set -x \
+    && apt-get update \
+    && apt-get --with-new-pkgs upgrade -y \
+    && apt-get install -y git \
+    ros-noetic-gazebo-ros \
+    ros-noetic-gazebo-ros-control \
+    ros-noetic-gazebo-ros-pkgs \
+    ros-noetic-gazebo-plugins \
+    && rm -rf /var/lib/apt/lists/*
 
 # Link python3 to python otherwise ROS scripts fail when using the OSRF contianer
 RUN ln -sf /usr/bin/python3 /usr/bin/python
