@@ -1,23 +1,32 @@
-FROM osrf/ros:noetic-desktop-full-focal
+# Base image
+FROM osrf/ros:noetic-desktop
 
 # Tell the container to use the C.UTF-8 locale for its language settings
 ENV LANG C.UTF-8
 
-RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+# Change the default shell to Bash
+SHELL [ "/bin/bash" , "-c" ]
 
-# Install required packages
-RUN set -x \
-    && apt-get update \
-    && apt-get --with-new-pkgs upgrade -y \
-    && apt-get install -y git \
-    ros-noetic-gazebo-ros \
-    ros-noetic-gazebo-ros-control \
-    ros-noetic-gazebo-ros-pkgs \
-    ros-noetic-gazebo-plugins \
-    && rm -rf /var/lib/apt/lists/*
+# Install Gazebo 11 and other dependencies
+RUN apt-get update && apt-get install -y \
+  ros-noetic-gazebo-ros-pkgs \
+  ros-noetic-gazebo-ros-control \
+  ros-noetic-ros-control \
+  ros-noetic-ros-controllers \
+  ros-noetic-joint-state-publisher \
+  ros-noetic-robot-state-publisher \
+  ros-noetic-robot-localization \
+  ros-noetic-xacro \
+  ros-noetic-tf2-ros \
+  ros-noetic-tf2-tools \
+  #ros-noetic-rmw-cyclonedds-cpp \
+  python3-colcon-common-extensions \
+  && rm -rf /var/lib/apt/lists/*
 
-# Link python3 to python otherwise ROS scripts fail when using the OSRF contianer
-RUN ln -sf /usr/bin/python3 /usr/bin/python
+# Create workspace and download simulation repository
+
+RUN source /opt/ros/noetic/setup.bash \
+ && mkdir -p /catkin_ws/src
 
 # Set up the catkin workspace
 RUN mkdir -p /catkin_ws/src
@@ -30,16 +39,20 @@ RUN git clone --depth=1 https://github.com/mathrosas/ros1_testing.git \
 RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/src/tortoisebot_action_server.py"
 RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/test/waypoints_test.test"
 
-# Build
-WORKDIR /catkin_ws
+# Build the Colcon workspace and ensure it's sourced
+RUN source /opt/ros/noetic/setup.bash \
+ && cd /catkin_ws \
+ && catkin_make
+RUN echo "source /catkin_ws/devel/setup.bash" >> ~/.bashrc
 
-RUN /bin/bash -lc "source /opt/ros/noetic/setup.bash && catkin_make"
+# Set up a workspace directory
+WORKDIR /catkin_ws/
 
-# replace setup.bash in ros_entrypoint.sh
-RUN sed -i 's|source "/opt/ros/\$ROS_DISTRO/setup.bash"|source "/catkin_ws/devel/setup.bash"|g' /ros_entrypoint.sh
+# Set environment variables
+ENV DISPLAY=:1
+ENV GAZEBO_MASTER_URI=${GAZEBO_MASTER_URI}
+ENV ROS_DOMAIN_ID=1
+#ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# Cleanup
-RUN rm -rf /root/.cache
-
-# Start a bash shell when the container starts
-CMD ["bash"]
+# We want /bin/bash to execute our /entrypoint.sh when container starts
+#CMD ["/entrypoint.sh"]
