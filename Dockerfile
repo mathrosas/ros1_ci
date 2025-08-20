@@ -27,8 +27,12 @@ RUN git clone --depth=1 https://github.com/mathrosas/ros1_testing.git \
  && mv ros1_testing/tortoisebot_waypoints /catkin_ws/src/ \
  && rm -rf ros1_testing
 
+RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/src/tortoisebot_action_server.py"
+RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/test/waypoints_test.test"
+
 # Build
 WORKDIR /catkin_ws
+
 RUN /bin/bash -lc "source /opt/ros/noetic/setup.bash && catkin_make"
 
 # replace setup.bash in ros_entrypoint.sh
