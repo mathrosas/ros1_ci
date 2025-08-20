@@ -15,15 +15,13 @@ RUN apt-get update && apt-get install -y \
 
 # Workspace
 ENV ROS_MASTER_URI=http://localhost:11311
-RUN mkdir -p $/simulation_ws/src
-WORKDIR $/simulation_ws
+RUN mkdir -p /simulation_ws/src
+WORKDIR /simulation_ws
 
 # Your repo with tortoisebot + tortoisebot_waypoints
-ARG REPO_URL="https://github.com/mathrosas/ros1_testing.git"
-ARG REPO_BRANCH="main"
 RUN source /opt/ros/noetic/setup.bash \
  && cd /simulation_ws/src \
- && git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" ros1_testing
+ && git clone --branch "main" --depth 1 "https://github.com/mathrosas/ros1_testing.git" ros1_testing
 
 # Ensure Python3 shebang + exec bit for Noetic
 RUN if [ -f "/simulation_ws/src/ros1_testing/tortoisebot_waypoints/scripts/tortoisebot_action_server.py" ]; then \
