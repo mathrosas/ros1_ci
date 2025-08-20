@@ -1,58 +1,46 @@
-# Base image
 FROM osrf/ros:noetic-desktop
+SHELL ["/bin/bash","-c"]
 
-# Tell the container to use the C.UTF-8 locale for its language settings
-ENV LANG C.UTF-8
-
-# Change the default shell to Bash
-SHELL [ "/bin/bash" , "-c" ]
-
-# Install Gazebo 11 and other dependencies
+# Deps
 RUN apt-get update && apt-get install -y \
-  ros-noetic-gazebo-ros-pkgs \
-  ros-noetic-gazebo-ros-control \
-  ros-noetic-ros-control \
-  ros-noetic-ros-controllers \
-  ros-noetic-joint-state-publisher \
-  ros-noetic-robot-state-publisher \
-  ros-noetic-robot-localization \
-  ros-noetic-xacro \
-  ros-noetic-tf2-ros \
-  ros-noetic-tf2-tools \
-  #ros-noetic-rmw-cyclonedds-cpp \
-  python3-colcon-common-extensions \
-  && rm -rf /var/lib/apt/lists/*
+    git xvfb \
+    ros-noetic-gazebo-ros-pkgs \
+    ros-noetic-gazebo-ros-control \
+    ros-noetic-ros-control ros-noetic-ros-controllers \
+    ros-noetic-joint-state-publisher ros-noetic-robot-state-publisher \
+    ros-noetic-robot-localization ros-noetic-xacro \
+    ros-noetic-tf2-ros ros-noetic-tf2-tools \
+    ros-noetic-rostest \
+ && rm -rf /var/lib/apt/lists/*
 
-# Create workspace and download simulation repository
+# Workspace
+ENV WS=/simulation_ws
+RUN mkdir -p $WS/src
+WORKDIR $WS
 
+# Your repo with tortoisebot + tortoisebot_waypoints
+ARG REPO_URL="https://github.com/mathrosas/ros1_testing.git"
+ARG REPO_BRANCH="main"
 RUN source /opt/ros/noetic/setup.bash \
- && mkdir -p /catkin_ws/src
+ && cd $WS/src \
+ && git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" ros1_testing
 
-# Set up the catkin workspace
-RUN mkdir -p /catkin_ws/src
-WORKDIR /tmp
-RUN git clone --depth=1 https://github.com/mathrosas/ros1_testing.git \
- && mv ros1_testing/tortoisebot /catkin_ws/src/ \
- && mv ros1_testing/tortoisebot_waypoints /catkin_ws/src/ \
- && rm -rf ros1_testing
+# Ensure Python3 shebang + exec bit for Noetic
+RUN if [ -f "$WS/src/ros1_testing/tortoisebot_waypoints/scripts/tortoisebot_action_server.py" ]; then \
+      sed -i '1s|python$|python3|' "$WS/src/ros1_testing/tortoisebot_waypoints/scripts/tortoisebot_action_server.py" || true; \
+      chmod +x "$WS/src/ros1_testing/tortoisebot_waypoints/scripts/tortoisebot_action_server.py"; \
+    fi
 
-RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/src/tortoisebot_action_server.py"
-RUN /bin/bash -c "chmod +x /catkin_ws/src/tortoisebot_waypoints/test/waypoints_test.test"
+# Build
+RUN source /opt/ros/noetic/setup.bash && cd $WS && catkin_make
 
-# Build the Colcon workspace and ensure it's sourced
-RUN source /opt/ros/noetic/setup.bash \
- && cd /catkin_ws \
- && catkin_make
-RUN echo "source /catkin_ws/devel/setup.bash" >> ~/.bashrc
+# Persist env
+RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc \
+ && echo "source $WS/devel/setup.bash" >> /root/.bashrc
 
-# Set up a workspace directory
-WORKDIR /catkin_ws/
-
-# Set environment variables
 ENV DISPLAY=:1
-ENV GAZEBO_MASTER_URI=${GAZEBO_MASTER_URI}
-ENV ROS_DOMAIN_ID=1
-#ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+WORKDIR $WS
 
-# We want /bin/bash to execute our /entrypoint.sh when container starts
-#CMD ["/entrypoint.sh"]
+COPY entrypoint.sh $WS/entrypoint.sh
+RUN chmod +x $WS/entrypoint.sh
+ENTRYPOINT ["/simulation_ws/entrypoint.sh"]
