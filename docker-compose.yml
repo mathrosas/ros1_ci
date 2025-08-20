@@ -1,0 +1,27 @@
+version: '3'
+services:
+  tortoisebot-ros1-ci:
+    image: tortoisebot-ros1-ci
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tortoise-ros1-ci
+    network_mode: bridge
+    environment:
+      - DISPLAY=${DISPLAY}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DOMAIN_ID=1
+      - GAZEBO_MASTER_URI=${GAZEBO_MASTER_URI}
+      - GAZEBO_PLUGIN_PATH=${GAZEBO_PLUGIN_PATH}
+      - GAZEBO_MODEL_DATABASE_URI=${GAZEBO_MODEL_DATABASE_URI}
+      - GAZEBO_RESOURCE_PATH=${GAZEBO_RESOURCE_PATH}
+      # - GAZEBO_MODEL_PATH=${GAZEBO_MODEL_PATH}:/models:/assets:/simulation_ws/src:/.gazebo/models
+      - QT_XCB_GLUE_ALWAYS_IN_USE=1
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # - $HOME/simulation_ws/src/ros1_ci/tortoisebot/tortoisebot_description/meshes:/assets
+      # - $HOME/simulation_ws/src/ros1_ci/tortoisebot/tortoisebot_gazebo/models:/models
+      - $HOME/.Xauthority:/root/.Xauthority:rw
+    #command: bash -c "source /opt/ros/noetic/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch the_construct_office_gazebo warehouse_rb1.launch.xml"
+    entrypoint: "/simulation_ws/src/ros1_ci/entrypoint.sh"
