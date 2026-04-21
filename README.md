@@ -1,154 +1,71 @@
-# Checkpoint 24 — Task 1
-## ROS1 CI for **TortoiseBot Waypoints** with **Jenkins + Docker** (Noetic)
+# Checkpoint 24 — `ros1_ci` (ROS 1 Continuous Integration)
 
-This README documents a complete, reproducible **Continuous Integration** setup for **ROS1 (Noetic)** that builds a Docker image, launches **Gazebo headless**, starts the **TortoiseBot waypoints action server**, runs **`rostest`**, and reports success/failure in **Jenkins** every time the code changes.
+Jenkins + Docker **Continuous Integration** pipeline for the **ROS 1 (Noetic)** TortoiseBot waypoints action server from Checkpoint 23. A Freestyle Jenkins job builds a purpose-built Docker image, launches **Gazebo headless** via **Xvfb**, starts the `tortoisebot_action_server`, runs the `rostest` node-level test suite, and reports pass/fail back to Jenkins. Triggered automatically whenever a new commit (or merged Pull Request) lands on `main`.
 
-- **Checkpoint**: 24 — *Continuous Integration*  
-- **Task**: 1 — Jenkins Basics (automate build & tests for a ROS package)  
-- **ROS repository under test**: `https://github.com/mathrosas/ros1_testing`  
-  - Packages: `tortoisebot`, `tortoisebot_waypoints`
-  - Tests: Python 3 (ROS Noetic)
+- **Repository under test**: `https://github.com/mathrosas/ros1_testing`
+- **Packages**: `tortoisebot`, `tortoisebot_waypoints`
+- **Tests**: Python 3 `rostest` node-level tests (final position + final yaw)
 
-This solution uses a **Freestyle** Jenkins job driven by shell steps and a purpose-built Docker image. No GUI is required during tests (Gazebo runs via **Xvfb**).
+<p align="center">
+  <img src="media/tortoisebot-sim.png" alt="TortoiseBot playground world in Gazebo (headless inside the CI container)" width="650"/>
+</p>
 
----
+## How It Works
 
-## Contents
+1. **Jenkins** polls `https://github.com/mathrosas/ros1_ci` every minute (`* * * * *`) and triggers a build on new commits
+2. **Docker build** — `Dockerfile` starts from `osrf/ros:noetic-desktop`, installs Gazebo + `rostest` + `xvfb`, clones `ros1_testing` into `/simulation_ws/src`, fixes the Python 3 shebang on the action server, and `catkin_make`s the workspace
+3. **Docker run** — `entrypoint.sh` starts Xvfb on `:1`, launches `tortoisebot_gazebo/tortoisebot_playground.launch gui:=false`, waits for the ROS master + Gazebo topics, starts the action server, waits for `/tortoisebot_as`
+4. **Tests** — `rostest tortoisebot_waypoints waypoints_test.test --reuse-master` runs against the live sim
+5. **Teardown** — kills the action server, `gzserver`, `gzclient`, and `Xvfb`; exits with the rostest result code so Jenkins marks the build red/green accordingly
 
-- [What the pipeline does](#what-the-pipeline-does)
-- [Prerequisites](#prerequisites)
-- [Local quickstart (no Jenkins)](#local-quickstart-no-jenkins)
-- [Start Jenkins](#start-jenkins)
-- [Create the Jenkins job](#create-the-jenkins-job)
-  - [Build steps (copy–paste)](#build-steps-copypaste)
-  - [Trigger on Git changes (Poll SCM)](#trigger-on-git-changes-poll-scm)
-- [Expected successful output](#expected-successful-output)
-- [How the pieces fit together](#how-the-pieces-fit-together)
-- [Troubleshooting](#troubleshooting)
-- [Optional improvements](#optional-improvements)
-- [License](#license)
-
----
-
-## What the pipeline does
-
-1. **Builds a CI Docker image** from `osrf/ros:noetic-desktop`, installing ROS/Gazebo deps, `rostest`, and `xvfb`.
-2. **Clones** `ros1_testing` into `/simulation_ws/src` and **builds** the Catkin workspace.
-3. **Runs headless Gazebo** using **Xvfb** with `DISPLAY=:1`; starts the **Waypoints Action Server**.
-4. **Executes `rostest`** (`tortoisebot_waypoints/waypoints_test.test`) against the running sim.
-5. **Cleans up** all processes (gzserver/gzclient/Xvfb) and exits with the **test result code**.
-6. **Jenkins** shows pass/fail and stores console logs; it’s triggered automatically by **Poll SCM**.
-
----
-
-## Prerequisites
-
-- **Ubuntu 20.04+** (or compatible Linux host)  
-- **Docker Engine** (and permissions for Jenkins to use it)  
-- **Jenkins** (this repo includes a helper script to start it locally)
-
-Install Docker & enable non-root usage:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose
-sudo service docker start
-
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-> CI notes: Allocate sufficient disk/RAM. The run step uses `--shm-size=2g` to keep Gazebo stable in headless mode.
-
----
-
-## Local quickstart (no Jenkins)
-
-You can build and run the CI container locally to verify everything works before wiring Jenkins.
-
-```bash
-# From the directory that contains this README and the Dockerfile
-docker build -t tortoisebot-ros1-ci .
-
-# Run tests headless; entrypoint will start Gazebo + action server + rostest
-docker run --rm --shm-size=2g -e CI=1 tortoisebot-ros1-ci
-```
-
-Expected test summary:
+## Project Structure
 
 ```
-SUMMARY
- * RESULT: SUCCESS
- * TESTS: 2
- * ERRORS: 0
- * FAILURES: 0
+ros1_ci/
+├── Dockerfile           # osrf/ros:noetic-desktop + Gazebo + rostest + xvfb + ros1_testing clone + catkin_make
+├── entrypoint.sh        # Xvfb → Gazebo → action server → rostest → cleanup
+├── run_jenkins.sh       # Helper: installs OpenJDK 17, downloads jenkins.war, launches Jenkins
+├── media/
+└── README.md
 ```
 
-If the container exits with code `0`, the tests passed.
+## Jenkins Setup
 
----
-
-## Start Jenkins
-
-This solution includes `run_jenkins.sh` to start a local Jenkins quickly:
+### Start Jenkins
 
 ```bash
 bash run_jenkins.sh
 ```
 
-What the script does:
+The script sets `JENKINS_HOME=~/webpage_ws/jenkins/`, installs OpenJDK 17, downloads `jenkins.war` (v2.463), and launches Jenkins in the background. The Jenkins URL and PID are written to `~/jenkins__pid__url.txt`.
 
-- Sets `JENKINS_HOME=~/webpage_ws/jenkins/`
-- Installs Java (OpenJDK 17)
-- Downloads and runs `jenkins.war` (v2.463) in the background
-- Prints **PID and URL** to `~/jenkins__pid__url.txt`
+Unlock with the initial admin password at `~/webpage_ws/jenkins/secrets/initialAdminPassword`, install suggested plugins, then log in with the lab credentials:
 
-Open the printed URL, unlock Jenkins with the initial admin password (see console or `~/webpage_ws/jenkins/secrets/initialAdminPassword`), install suggested plugins, and go to the **Dashboard**.
+- **Username**: `admin`
+- **Password**: `password`
 
----
+> ⚠️ Lab-only credentials — do not reuse in any public or production environment.
 
+### Create the job
 
-### Jenkins login (credentials for this checkpoint)
-
-For this exercise, use the following Jenkins admin credentials:
-
-- **Username:** `admin`
-- **Password:** `password`
-
-> ⚠️ **Security note:** These credentials are provided for a learning/lab environment. 
-> Do **not** reuse them in public or production systems. Change the password immediately if you expose Jenkins to any untrusted network.
-
-## Create the Jenkins job
-
-1. **Dashboard → New Item →** *Freestyle project*  
-   Name it, for example: **ROS 1 CI – Tortoisebot Waypoints**.
-2. **Description** (optional):  
-   “Build Docker, run headless Gazebo + `rostest` for TortoiseBot waypoints.”
-3. **Source Code Management → Git**  
-   - Repository URL: `https://github.com/mathrosas/ros1_ci` *(this CI scaffolding repo)*  
+1. **Dashboard → New Item → Freestyle project** — e.g. `ROS 1 CI – Tortoisebot Waypoints`
+2. **Source Code Management → Git**
+   - Repository URL: `https://github.com/mathrosas/ros1_ci`
    - Branches to build: `main`
-4. **Build Triggers**: configure **Poll SCM** (below).  
-5. **Build**: add the three shell steps in the next section.
+3. **Build Triggers → Poll SCM**: `* * * * *`
+4. **Build**: add the three shell steps below (each as a separate *Execute shell* step)
 
-### Build steps (copy–paste)
+### Build steps (copy-paste)
 
-**Step 1 — Preflight & housekeeping**
+**Step 1 — Preflight**
 
 ```bash
 set -euxo pipefail
+whoami && uname -a && docker --version && git --version && df -h
 
-echo "== Preflight =="
-
-whoami
-uname -a
-docker --version
-git --version
-df -h
-
-# allow Jenkins to talk to Docker (quick-and-dirty for learning envs)
+# allow Jenkins to talk to Docker (fine for a lab env)
 sudo chmod 666 /var/run/docker.sock || true
 
-# keep the host clean
 docker image prune -f || true
 docker container prune -f || true
 ```
@@ -157,53 +74,34 @@ docker container prune -f || true
 
 ```bash
 set -euxo pipefail
-
-# Build the Docker image that clones and builds the ROS workspace
 docker build --pull -t tortoisebot-ros1-ci \
   --build-arg REPO_URL=https://github.com/mathrosas/ros1_testing.git \
   --build-arg REPO_BRANCH=main \
   .
 ```
 
-> Note: The current Dockerfile clones `ros1_testing` directly; the two args above are provided for future parameterization (you may see a “not consumed” warning).
-
 **Step 3 — Run the tests headless**
 
 ```bash
 set -euxo pipefail
-
-# Make sure any old container is gone
 docker rm -f tortoise-ros1-ci >/dev/null 2>&1 || true
-
-# Run headless; entrypoint starts Xvfb + Gazebo + action server + rostest
-docker run --name tortoise-ros1-ci --rm \
-  --shm-size=2g \
-  -e CI=1 \
-  tortoisebot-ros1-ci
+docker run --name tortoise-ros1-ci --rm --shm-size=2g -e CI=1 tortoisebot-ros1-ci
 ```
 
-### Trigger on Git changes (Poll SCM)
+`--shm-size=2g` keeps Gazebo stable under headless rendering. No `-it` — Jenkins has no TTY.
 
-- **Build Triggers → Poll SCM**: `* * * * *`  
-  Jenkins will check the repository every minute and build only if a new commit is found.
+## Local Quickstart (no Jenkins)
 
----
+Sanity-check the image before wiring it into Jenkins:
 
-## Expected successful output
+```bash
+docker build -t tortoisebot-ros1-ci .
+docker run --rm --shm-size=2g -e CI=1 tortoisebot-ros1-ci
+```
 
-Tail of a passing build (abridged):
+Expected tail:
 
 ```
-Successfully tagged tortoisebot-ros1-ci:latest
-
-+ docker run --name tortoise-ros1-ci --rm --shm-size=2g -e CI=1 tortoisebot-ros1-ci
-[2025-08-20 22:25:10] Launching TortoiseBot world...
-[2025-08-20 22:25:10] Waiting for ROS master...
-[2025-08-20 22:25:12] Waiting for Gazebo...
-[2025-08-20 22:25:14] Starting Waypoints Action Server...
-[2025-08-20 22:25:16] Running rostest...
-[ROSUNIT] Outputting test results to /root/.ros/test_results/tortoisebot_waypoints/rostest-test_waypoints_test.xml
-
 [ROSTEST]-----------------------------------------------------------------------
 [tortoisebot_waypoints.rosunit-test_waypoints/test_final_position][passed]
 [tortoisebot_waypoints.rosunit-test_waypoints/test_final_yaw][passed]
@@ -213,102 +111,79 @@ SUMMARY
  * TESTS: 2
  * ERRORS: 0
  * FAILURES: 0
-
-[2025-08-20 22:25:30] TEST RESULT: 0
-[2025-08-20 22:25:30] Shutting down...
-Finished: SUCCESS
 ```
 
----
+Exit code `0` = tests passed.
 
-## How the pieces fit together
+## Triggering a Build via Pull Request
 
-- **Dockerfile**
-  - Base image: `osrf/ros:noetic-desktop`
-  - Installs: Gazebo ROS pkgs, controllers, `rostest`, `xvfb`, and utilities.
-  - Creates `/simulation_ws`, **clones** `ros1_testing`, ensures Python 3 shebang on the action server script, and **builds** the workspace.
-  - Persists env setup to `/root/.bashrc` and sets `ROS_MASTER_URI=http://localhost:11311`.
+1. In the `ros1_ci` GitHub repo, create or edit any file (e.g. `trigger.txt`), commit to a branch, open a Pull Request, and merge it into `main`
+2. Within one minute, Poll SCM picks up the new commit and kicks off a Jenkins build
+3. Watch the live logs via **Build History → #<n> → Console Output**
 
-- **entrypoint.sh**
-  - Starts **Xvfb** (`DISPLAY=:1`), launches **Gazebo** headless (`tortoisebot_playground.launch gui:=false`).
-  - Waits for ROS master and Gazebo topics to be ready.
-  - Starts the **Waypoints Action Server** and waits for `/tortoisebot_as`.
-  - Runs **`rostest tortoisebot_waypoints waypoints_test.test --reuse-master`**.
-  - Prints the test result and **cleans up** (action server, gzserver, Xvfb). Exits with the test code.
+<p align="center">
+  <img src="media/create-pr.png" alt="Creating a Pull Request against ros1_ci to trigger the Jenkins pipeline" width="650"/>
+</p>
 
-- **run_jenkins.sh**
-  - Sets `JENKINS_HOME`, installs Java, downloads `jenkins.war`, launches Jenkins, and prints the **URL** & **PID** for convenience.
+## Prerequisites
 
----
+- Ubuntu 20.04+ (or any Linux host with Docker + Java)
+- **Docker Engine** (Jenkins user must be able to run `docker` — the preflight step `chmod 666`'s the socket as a shortcut)
+- **OpenJDK 17** (installed by `run_jenkins.sh`)
 
-## Troubleshooting
-
-- **“the input device is not a TTY” inside Jenkins**  
-  Remove `-it` from `docker run` (this guide’s run step omits it).
-
-- **Docker permissions for Jenkins**  
-  If Docker commands fail with permissions errors, the preflight step uses:  
-  `sudo chmod 666 /var/run/docker.sock` (fine for a classroom/lab).  
-  Prefer adding the Jenkins user to the `docker` group in real deployments.
-
-- **Gazebo headless / display issues**  
-  Ensure `xvfb` is installed; `entrypoint.sh` sets `DISPLAY=:1`. Keep `--shm-size=2g` to avoid shared-memory crashes.
-
-- **ROS env variables (Noetic + bash -u)**  
-  The image sets `ROS_MASTER_URI=http://localhost:11311`. If you add strict `set -u`, ensure environment variables are defined before sourcing ROS scripts.
-
-- **Python 3**  
-  The Noetic stack uses Python 3. The entrypoint ensures the waypoints action server script has a Python 3 shebang and is executable.
-
-- **Disk pressure**  
-  Docker images are big; the preflight step prunes images/containers. Periodically `docker system prune -af` if the host is near capacity.
-
----
-
-## Optional improvements
-
-- **Parameterize the Dockerfile** to fully consume build args:
-  ```dockerfile
-  ARG REPO_URL="https://github.com/mathrosas/ros1_testing.git"
-  ARG REPO_BRANCH="main"
-  RUN git clone --branch "${REPO_BRANCH}" --depth 1 "${REPO_URL}" ros1_testing
-  ```
-
-- **Publish test results** using “Publish JUnit test result report” and point it to:  
-  `/root/.ros/test_results/**/*.xml` to see test graphs/trends in Jenkins.
-
-- **Enable BuildKit / buildx** to speed up image builds and caching.
-
-- **Switch to a Jenkinsfile** (Pipeline as Code) once the freestyle flow is stable.
-
----
-
-## License
-
-This CI setup is provided as-is for educational and internal testing purposes.  
-Use under this repository’s license and the upstream licenses of ROS packages and `ros1_testing`.
-
----
-
-### TL;DR (end-to-end)
+Install Docker & enable non-root usage:
 
 ```bash
-# 1) Docker
 sudo apt-get update
 sudo apt-get install -y docker.io docker-compose
 sudo service docker start
 sudo usermod -aG docker $USER
 newgrp docker
-
-# 2) Jenkins
-bash run_jenkins.sh
-# Open URL from ~/jenkins__pid__url.txt and complete setup
-
-# 3) Jenkins Job (Freestyle)
-#   - SCM: https://github.com/mathrosas/ros1_ci  (branch: main)
-#   - Build: paste the three steps from this README
-#   - Triggers: Poll SCM (* * * * *)
-
-# 4) Commit & push
-# Jenkins builds the image, runs Gazebo headless, executes rostest, and reports status.
 ```
+
+## Troubleshooting
+
+### Docker permissions
+
+If Jenkins can't reach Docker: `sudo chmod 666 /var/run/docker.sock` (lab shortcut) or add the Jenkins user to the `docker` group.
+
+### Gazebo stuck / lingering `gzserver`
+
+The entrypoint `pkill`s `gzserver` + `gzclient` on exit, but lingering processes on the host can still block the next run:
+
+```bash
+ps faux | grep gz
+kill -9 <process_id>
+```
+
+<p align="center">
+  <img src="media/kill-gzserver.png" alt="Killing a lingering gzserver process" width="650"/>
+</p>
+
+### Python 3 shebang
+
+Noetic runs Python 3 — the Dockerfile rewrites the action server shebang from `python` to `python3` and sets the executable bit. If you port the repo elsewhere, keep that fixup.
+
+### Disk pressure
+
+Docker images are heavy. The preflight step prunes dangling images/containers; run `docker system prune -af` occasionally on the host.
+
+### TTY errors in Jenkins
+
+Never add `-it` to `docker run` inside a Jenkins build — Jenkins has no controlling TTY.
+
+## Key Concepts Covered
+
+- **Jenkins Freestyle** job driven by shell steps (Dockerfile + entrypoint do the real work)
+- **Headless Gazebo** via `Xvfb` + `DISPLAY=:1` + `gui:=false` — no X server required on the CI host
+- **Reproducible ROS build** inside Docker — clone + `catkin_make` baked into the image so every run starts from the same state
+- **`rostest` inside CI** — `--reuse-master` so the action server and tests share the Gazebo master started by the entrypoint
+- **Poll SCM** as a minimal "build on push / PR merge" trigger (no GitHub webhook required)
+
+## Technologies
+
+- Jenkins LTS (`jenkins.war` 2.463, OpenJDK 17)
+- Docker Engine (`osrf/ros:noetic-desktop` base image)
+- ROS 1 Noetic + Gazebo 11 (headless via `xvfb`)
+- Python 3 (`rospy`, `actionlib`, `tf`)
+- `rostest` (`tortoisebot_msgs` custom action)
